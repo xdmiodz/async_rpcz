@@ -24,7 +24,7 @@ class ReplyChannel:
             reply_header.error = error_msg
 
         reply_header_raw = reply_header.SerializeToString()
-        await self.socket.send(self.event_id, reply_header_raw)
+        await self.socket.send_multipart([self.event_id, reply_header_raw])
 
 class AsyncRpczServerMeta(type):
     def __new__(cls, name, bases, attrs):

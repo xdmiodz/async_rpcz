@@ -1,6 +1,6 @@
 ## Python implementation of RPCZ server/client with asyncio support
 
-[RPCZ](https://github.com/thesamet/rpcz) is great, it mixes both two useful technologies - ZeroMQ and Protobuf. But the main project is abandoned and it lacks of support for another very useful thing in Python - asyncio. So I decided to make an alternative implementation of RPCZ client/server in Python, but this time with asyncio.
+[RPCZ](https://github.com/thesamet/rpcz) is great, it blends together two useful technologies - ZeroMQ and Protobuf. But the main project is abandoned and it lacks of support for another very useful thing in Python - asyncio. So I decided to make an alternative implementation of RPCZ client/server in Python, but this time with asyncio.
 
 Currently it has only server implementation, but I hope there will be the client too.
 Now the implemation is kind of cumbersome, but it works

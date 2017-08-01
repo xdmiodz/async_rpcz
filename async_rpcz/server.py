@@ -101,11 +101,9 @@ class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
             socket_events  = dict(await poller.poll(10))
             for socket in socket_events:
                 if socket is frontend_socket:
-                    print("hi front")
                     msg = await frontend_socket.recv_multipart()
                     await backend_socket.send_multipart(msg)
                 else:
-                    print("hi back")
                     msg = await backend_socket.recv_multipart()
                     await frontend_socket.send_multipart(msg)
 

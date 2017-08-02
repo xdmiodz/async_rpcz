@@ -5,8 +5,8 @@ import asyncio
 from uuid import uuid4
 
 class ReplyChannel:
-    def __init__(self, event_id, socket):
-        self.event_id = event_id
+    def __init__(self, message_headers, socket):
+        self.message_headers = message_headers
         self.socket = socket
 
     async def send(self, message):
@@ -16,7 +16,9 @@ class ReplyChannel:
 
         reply_header_raw = reply_header.SerializeToString()
         message_raw = message.SerializeToString()
-        await self.socket.send_multipart([self.event_id, reply_header_raw, message_raw])
+
+        msg = self.message_headers + [reply_header_raw, message_raw]
+        await self.socket.send_multipart(msg)
 
     async def send_error(self, error, error_msg=None):
         reply_header = rpcz_pb2.rpc_response_header()
@@ -24,8 +26,9 @@ class ReplyChannel:
         if error_msg:
             reply_header.error = error_msg
 
-        reply_header_raw = reply_header.SerializeToString()
-        await self.socket.send_multipart([self.event_id, reply_header_raw])
+        msg = self.message_headers + [reply_header_raw,]
+        await self.socket.send_multipart(msg)
+
 
 class AsyncRpczServerMeta(type):
     def __new__(cls, name, bases, attrs):
@@ -42,16 +45,22 @@ class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
         self._ctx = zmq.asyncio.Context()
         self._number_of_workers = number_of_workers
 
-    async def backend_worker(self):
+    async def backend_worker(self, worker_address):
         ctx = self._ctx
-        backend_socket = ctx.socket(zmq.REP)
-        backend_socket.connect(self._backend_address)
+        backend_socket = ctx.socket(zmq.PAIR)
+        backend_socket.bind(worker_address)
 
         while True:
             header = rpcz_pb2.rpc_request_header()
 
-            event_id, header_raw, msg_raw = await backend_socket.recv_multipart()
-            reply = ReplyChannel(event_id, backend_socket)
+            msg = await backend_socket.recv_multipart()
+
+            message_headers = msg[:-2]
+
+            header_raw = msg[-2]
+            msg_raw = msg[-1]
+
+            reply = ReplyChannel(message_headers, backend_socket)
 
             try:
                 header.ParseFromString(header_raw)
@@ -85,30 +94,55 @@ class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
 
             await method(msg, reply)
 
+            await backend_socket.send(b"")
+
     async def frontend_worker(self, server_address):
         ctx = self._ctx
         frontend_socket = ctx.socket(zmq.ROUTER)
         frontend_socket.bind(server_address)
 
-        backend_socket = ctx.socket(zmq.DEALER)
-        backend_socket.bind(self._backend_address)
-
         poller = zmq.asyncio.Poller()
         poller.register(frontend_socket, flags=zmq.POLLIN)
-        poller.register(backend_socket, flags=zmq.POLLIN)
+
+        free_backend_sockets = set()
+        socket_to_address = {}
+        for worker_address in self.workers_addresses:
+            backend_socket = ctx.socket(zmq.PAIR)
+            backend_socket.connect(worker_address)
+            poller.register(backend_socket, flags=zmq.POLLIN)
+            free_backend_sockets.add(backend_socket)
+            socket_to_address[backend_socket] = worker_address
+
+        busy_backend_sockets = set()
 
         while True:
-            socket_events  = dict(await poller.poll(10))
-            for socket in socket_events:
+            socket_events = await poller.poll(1000)
+
+            for socket, _ in socket_events:
                 if socket is frontend_socket:
+                    if len(free_backend_sockets) == 0:
+                        await frontend_socket.recv_multipart()
+                        continue
+
+                    backend_socket = free_backend_sockets.pop()
+                    busy_backend_sockets.add(backend_socket)
+
                     msg = await frontend_socket.recv_multipart()
                     await backend_socket.send_multipart(msg)
-                else:
-                    msg = await backend_socket.recv_multipart()
-                    await frontend_socket.send_multipart(msg)
+                elif socket in busy_backend_sockets:
+                    msg = await socket.recv_multipart()
+
+                    if len(msg) == 1:
+                        busy_backend_sockets.remove(socket)
+                        free_backend_sockets.add(socket)
+                    else:
+                        await frontend_socket.send_multipart(msg)
+
 
     async def run(self, server_address):
-        backend_workers_tasks = [self.backend_worker() for _ in range(self._number_of_workers)]
+        self.workers_addresses = ["inproc://worker_{}".format(worker_id) for worker_id in range(self._number_of_workers)]
+
+        backend_workers_tasks = [self.backend_worker(worker_address) for worker_address in self.workers_addresses]
         frontend_worker_task = self.frontend_worker(server_address)
 
         tasks = backend_workers_tasks

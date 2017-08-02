@@ -116,7 +116,7 @@ class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
         busy_backend_sockets = set()
 
         while True:
-            socket_events = await poller.poll(1000)
+            socket_events = await poller.poll(10)
 
             for socket, _ in socket_events:
                 if socket is frontend_socket:

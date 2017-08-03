@@ -48,6 +48,7 @@ class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
     async def backend_worker(self, worker_address):
         ctx = self._ctx
         backend_socket = ctx.socket(zmq.PAIR)
+        backend_socket.linger = 0
         backend_socket.bind(worker_address)
 
         while True:
@@ -99,6 +100,7 @@ class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
     async def frontend_worker(self, server_address):
         ctx = self._ctx
         frontend_socket = ctx.socket(zmq.ROUTER)
+        frontend_socket.linger = 0
         frontend_socket.bind(server_address)
 
         poller = zmq.asyncio.Poller()

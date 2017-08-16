@@ -101,7 +101,12 @@ class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
         ctx = self._ctx
         frontend_socket = ctx.socket(zmq.ROUTER)
         frontend_socket.linger = 0
-        frontend_socket.bind(server_address)
+
+        if isinstance(server_address, str):
+            server_address = [server_address,]
+
+        for address in server_address:
+            frontend_socket.bind(address)
 
         poller = zmq.asyncio.Poller()
         poller.register(frontend_socket, flags=zmq.POLLIN)
@@ -142,7 +147,7 @@ class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
 
 
     async def run(self, server_address):
-        self.workers_addresses = ["inproc://worker_{}".format(worker_id) for worker_id in range(self._number_of_workers)]
+        self.workers_addresses = ["inproc://worker_{}".format(uuid4()) for worker_id in range(self._number_of_workers)]
 
         backend_workers_tasks = [self.backend_worker(worker_address) for worker_address in self.workers_addresses]
         frontend_worker_task = self.frontend_worker(server_address)

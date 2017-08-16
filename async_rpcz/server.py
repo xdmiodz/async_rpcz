@@ -23,8 +23,11 @@ class ReplyChannel:
     async def send_error(self, error, error_msg=None):
         reply_header = rpcz_pb2.rpc_response_header()
         reply_header.application_error = error
+
         if error_msg:
             reply_header.error = error_msg
+
+        reply_header_raw = reply_header.SerializeToString()
 
         msg = self.message_headers + [reply_header_raw,]
         await self.socket.send_multipart(msg)

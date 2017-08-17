@@ -6,6 +6,7 @@ import asyncio
 import uuid
 import struct
 from .async_timeout import timeout
+from asyncio import Lock
 
 class AsyncRpczClient():
     def __init__(self, server_address, descriptor):
@@ -18,6 +19,7 @@ class AsyncRpczClient():
         self._backend_socket.connect(server_address)
         self._events = dict()
         self._event_id = 0
+        self._socket_lock = Lock()
 
     @property
     def event_id(self):
@@ -25,7 +27,8 @@ class AsyncRpczClient():
         return self._event_id
 
     async def _process(self):
-        msg = await self._backend_socket.recv_multipart()
+        async with self._socket_lock:
+            msg = await self._backend_socket.recv_multipart()
         event_id_raw, _, header_raw, msg_raw = msg
         event_id = struct.unpack("!Q", event_id_raw)[0]
         self._events[event_id] = True
@@ -49,8 +52,8 @@ class AsyncRpczClient():
             request_raw = request.SerializeToString()
 
             event = self._events[event_id] = False
-
-            await self._backend_socket.send_multipart([event_id_raw, b"", header_raw, request_raw])
+            async with self._socket_lock:
+                await self._backend_socket.send_multipart([event_id_raw, b"", header_raw, request_raw])
 
             deadline_ms = deadline_ms if deadline_ms >= 0 else None
 

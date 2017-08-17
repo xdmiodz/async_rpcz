@@ -4,46 +4,17 @@ import zmq.asyncio
 import asyncio
 from uuid import uuid4
 
-class ReplyChannel:
-    def __init__(self, message_headers, socket):
-        self.message_headers = message_headers
-        self.socket = socket
-
-    async def send(self, message):
-        reply_header = rpcz_pb2.rpc_response_header()
-
-        reply_header.status = rpcz_pb2.rpc_response_header.OK
-
-        reply_header_raw = reply_header.SerializeToString()
-        message_raw = message.SerializeToString()
-
-        msg = self.message_headers + [reply_header_raw, message_raw]
-        await self.socket.send_multipart(msg)
-
-    async def send_error(self, error, error_msg=None):
-        reply_header = rpcz_pb2.rpc_response_header()
-        reply_header.application_error = error
-
-        if error_msg:
-            reply_header.error = error_msg
-
-        reply_header_raw = reply_header.SerializeToString()
-
-        msg = self.message_headers[:1] + [reply_header_raw,]
-        await self.socket.send_multipart(msg)
-
-
-class AsyncRpczServerMeta(type):
-    def __new__(cls, name, bases, attrs):
-        if "DESCRIPTOR" not in attrs:
+class AsyncRpczClientrMeta(type):
+    if "DESCRIPTOR" not in attrs:
             return super(AsyncRpczServerMeta, cls).__new__(cls, name, bases, attrs)
         descriptor = attrs["DESCRIPTOR"]
         attrs["_service_name"] = descriptor.name
         attrs["_method_descriptor_map"] = {method.name: method for method in descriptor.methods}
         return super(AsyncRpczServerMeta, cls).__new__(cls, name, bases, attrs)
 
-class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
-    def __init__(self, number_of_workers=10):
+
+class AsyncRpczClient(metaclass=AsyncRpczServerClient):
+    def __init__(self, server_address):
         self._backend_address = "inproc://.{}".format(uuid4())
         self._ctx = zmq.asyncio.Context()
         self._number_of_workers = number_of_workers
@@ -158,3 +129,4 @@ class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
         tasks = backend_workers_tasks
         tasks.append(frontend_worker_task)
         await asyncio.gather(*tasks)
+

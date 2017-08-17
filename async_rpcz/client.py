@@ -5,7 +5,6 @@ import zmq.asyncio
 import asyncio
 import uuid
 import struct
-from asyncio import Event
 from .async_timeout import timeout
 
 class AsyncRpczClient():
@@ -29,8 +28,7 @@ class AsyncRpczClient():
         msg = await self._backend_socket.recv_multipart()
         event_id_raw, _, header_raw, msg_raw = msg
         event_id = struct.unpack("!Q", event_id_raw)[0]
-        self._events[event_id].set()
-
+        self._events[event_id] = True
         return header_raw, msg_raw
 
     def __getattr__(self, name):
@@ -50,7 +48,7 @@ class AsyncRpczClient():
             header_raw = header.SerializeToString()
             request_raw = request.SerializeToString()
 
-            event = self._events[event_id] = Event()
+            event = self._events[event_id] = False
 
             await self._backend_socket.send_multipart([event_id_raw, b"", header_raw, request_raw])
 
@@ -58,13 +56,12 @@ class AsyncRpczClient():
 
             try:
                 with timeout(deadline_ms):
-                    while not event.is_set():
+                    while not self._events[event_id]:
                         header_raw, msg_raw = await self._process()
             except asyncio.TimeoutError:
                 raise RpcDeadlineExceeded()
 
             self._events.pop(event_id)
-
             header = rpcz_pb2.rpc_response_header()
             header.ParseFromString(header_raw)
 

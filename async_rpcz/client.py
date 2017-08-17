@@ -29,7 +29,8 @@ class AsyncRpczClient():
     async def _process(self):
         async with self._socket_lock:
             msg = await self._backend_socket.recv_multipart()
-        event_id_raw, _, header_raw, msg_raw = msg
+
+        _, event_id_raw, header_raw, msg_raw = msg
         event_id = struct.unpack("!Q", event_id_raw)[0]
         self._events[event_id] = True
         return header_raw, msg_raw
@@ -53,7 +54,7 @@ class AsyncRpczClient():
 
             event = self._events[event_id] = False
             async with self._socket_lock:
-                await self._backend_socket.send_multipart([event_id_raw, b"", header_raw, request_raw])
+                await self._backend_socket.send_multipart([b"", event_id_raw, header_raw, request_raw])
 
             deadline_ms = deadline_ms if deadline_ms >= 0 else None
 

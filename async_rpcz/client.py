@@ -1,132 +1,81 @@
+from rpcz.rpc import RpcDeadlineExceeded, RpcApplicationError, RpcError
 from rpcz import rpcz_pb2
 import zmq
 import zmq.asyncio
 import asyncio
-from uuid import uuid4
+import uuid
+import struct
+from asyncio import Event
+from .async_timeout import timeout
 
-class AsyncRpczClientrMeta(type):
-    if "DESCRIPTOR" not in attrs:
-            return super(AsyncRpczServerMeta, cls).__new__(cls, name, bases, attrs)
-        descriptor = attrs["DESCRIPTOR"]
-        attrs["_service_name"] = descriptor.name
-        attrs["_method_descriptor_map"] = {method.name: method for method in descriptor.methods}
-        return super(AsyncRpczServerMeta, cls).__new__(cls, name, bases, attrs)
+class AsyncRpczClient():
+    def __init__(self, server_address, descriptor):
+        self._service_name = descriptor.name
+        self._method_descriptor_map = {method.name: method for method in descriptor.methods}
 
-
-class AsyncRpczClient(metaclass=AsyncRpczServerClient):
-    def __init__(self, server_address):
-        self._backend_address = "inproc://.{}".format(uuid4())
         self._ctx = zmq.asyncio.Context()
-        self._number_of_workers = number_of_workers
+        self._backend_socket = self._ctx.socket(zmq.DEALER)
+        self._backend_socket.linger = 0
+        self._backend_socket.connect(server_address)
+        self._events = dict()
+        self._event_id = 0
 
-    async def backend_worker(self, worker_address):
-        ctx = self._ctx
-        backend_socket = ctx.socket(zmq.PAIR)
-        backend_socket.linger = 0
-        backend_socket.bind(worker_address)
+    @property
+    def event_id(self):
+        self._event_id =+ 1
+        return self._event_id
 
-        while True:
+    async def _process(self):
+        msg = await self._backend_socket.recv_multipart()
+        event_id_raw, _, header_raw, msg_raw = msg
+        event_id = struct.unpack("!Q", event_id_raw)[0]
+        self._events[event_id].set()
+
+        return header_raw, msg_raw
+
+    def __getattr__(self, name):
+        method_descriptor = self._method_descriptor_map.get(name, None)
+        if method_descriptor is None:
+            raise AttributeError("No rpcz method {}".format(name))
+
+        async def _method(request, deadline_ms=-1):
+            event_id = self.event_id
             header = rpcz_pb2.rpc_request_header()
+            header.event_id = event_id
+            header.deadline = deadline_ms
+            header.service = self._service_name
+            header.method = name
 
-            msg = await backend_socket.recv_multipart()
+            event_id_raw = struct.pack("!Q", event_id)
+            header_raw = header.SerializeToString()
+            request_raw = request.SerializeToString()
 
-            message_headers = msg[:-2]
+            event = self._events[event_id] = Event()
 
-            header_raw = msg[-2]
-            msg_raw = msg[-1]
+            await self._backend_socket.send_multipart([event_id_raw, b"", header_raw, request_raw])
 
-            reply = ReplyChannel(message_headers, backend_socket)
-
-            try:
-                header.ParseFromString(header_raw)
-            except:
-                await reply.send_error(rpcz_pb2.rpc_response_header.INVALID_HEADER)
-                continue
-
-            if header.service != self._service_name:
-                await reply.send_error(rpcz_pb2.rpc_response_header.NO_SUCH_SERVICE)
-                continue
-
-            method_name = header.method
-
-            method_descriptor = self._method_descriptor_map.get(method_name, None)
-            if method_descriptor is None:
-                await reply.send_error(rpcz_pb2.rpc_response_header.NO_SUCH_METHOD)
-                continue
-
-            method = getattr(self, method_name, None)
-            if method is None:
-                await reply.send_error(rpcz_pb2.rpc_response_header.METHOD_NOT_IMPLEMENTED)
-                continue
-
-            msg = method_descriptor.input_type._concrete_class()
+            deadline_ms = deadline_ms if deadline_ms >= 0 else None
 
             try:
-                msg.ParseFromString(msg_raw)
-            except:
-                await reply.send_error(rpcz_pb2.rpc_response_header.INVALID_MESSAGE)
-                continue
+                with timeout(deadline_ms):
+                    while not event.is_set():
+                        header_raw, msg_raw = await self._process()
+            except asyncio.TimeoutError:
+                raise RpcDeadlineExceeded()
 
-            await method(msg, reply)
+            self._events.pop(event_id)
 
-            await backend_socket.send(b"")
+            header = rpcz_pb2.rpc_response_header()
+            header.ParseFromString(header_raw)
 
-    async def frontend_worker(self, server_address):
-        ctx = self._ctx
-        frontend_socket = ctx.socket(zmq.ROUTER)
-        frontend_socket.linger = 0
+            if header.status == rpcz_pb2.rpc_response_header.APPLICATION_ERROR:
+                raise RpcApplicationError(header.application_error, header.error)
+            elif header.status != rpcz_pb2.rpc_response_header.OK:
+                raise RpcError(header.status)
 
-        if isinstance(server_address, str):
-            server_address = [server_address,]
+            response = method_descriptor.output_type._concrete_class()
+            response.ParseFromString(msg_raw)
+            return response
 
-        for address in server_address:
-            frontend_socket.bind(address)
-
-        poller = zmq.asyncio.Poller()
-        poller.register(frontend_socket, flags=zmq.POLLIN)
-
-        free_backend_sockets = set()
-        socket_to_address = {}
-        for worker_address in self.workers_addresses:
-            backend_socket = ctx.socket(zmq.PAIR)
-            backend_socket.connect(worker_address)
-            poller.register(backend_socket, flags=zmq.POLLIN)
-            free_backend_sockets.add(backend_socket)
-            socket_to_address[backend_socket] = worker_address
-
-        busy_backend_sockets = set()
-
-        while True:
-            socket_events = await poller.poll(10)
-
-            for socket, _ in socket_events:
-                if socket is frontend_socket:
-                    if len(free_backend_sockets) == 0:
-                        await frontend_socket.recv_multipart()
-                        continue
-
-                    backend_socket = free_backend_sockets.pop()
-                    busy_backend_sockets.add(backend_socket)
-
-                    msg = await frontend_socket.recv_multipart()
-                    await backend_socket.send_multipart(msg)
-                elif socket in busy_backend_sockets:
-                    msg = await socket.recv_multipart()
-
-                    if len(msg) == 1:
-                        busy_backend_sockets.remove(socket)
-                        free_backend_sockets.add(socket)
-                    else:
-                        await frontend_socket.send_multipart(msg)
-
-
-    async def run(self, server_address):
-        self.workers_addresses = ["inproc://worker_{}".format(uuid4()) for worker_id in range(self._number_of_workers)]
-
-        backend_workers_tasks = [self.backend_worker(worker_address) for worker_address in self.workers_addresses]
-        frontend_worker_task = self.frontend_worker(server_address)
-
-        tasks = backend_workers_tasks
-        tasks.append(frontend_worker_task)
-        await asyncio.gather(*tasks)
+        return _method
 

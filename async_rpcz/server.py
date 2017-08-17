@@ -22,6 +22,7 @@ class ReplyChannel:
 
     async def send_error(self, error, error_msg=None):
         reply_header = rpcz_pb2.rpc_response_header()
+        reply_header.status = rpcz_pb2.rpc_response_header.APPLICATION_ERROR
         reply_header.application_error = error
 
         if error_msg:
@@ -31,7 +32,6 @@ class ReplyChannel:
 
         msg = self.message_headers + [reply_header_raw, b""]
         await self.socket.send_multipart(msg)
-
 
 class AsyncRpczServerMeta(type):
     def __new__(cls, name, bases, attrs):

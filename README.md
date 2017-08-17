@@ -2,9 +2,7 @@
 
 [RPCZ](https://github.com/thesamet/rpcz) is great, it blends together two useful technologies - ZeroMQ and Protobuf. But the main project is abandoned and it lacks of support for another very useful thing in Python - asyncio. So I decided to make an alternative implementation of RPCZ client/server in Python, but this time with asyncio.
 
-Currently it has only server implementation, but I hope there will be the client too.
-Now the implemation is kind of cumbersome, but it works
-
+The implemenation is intended to be fully compatible with the original RPCZ client/server, but if it's not, please send me the issue.
 
 ## Usage
 Let's suppose you have a `my_service.proto` file with description of your service:
@@ -55,3 +53,27 @@ def main():
     loop.run_until_complete(server_task)
 
 ```
+
+### Client
+
+The client is even simplier
+
+```python
+import asyncio
+import zmq
+import zmq.asyncio
+
+loop = zmq.asyncio.ZMQEventLoop()
+asyncio.set_event_loop(loop)
+
+from async_rpcz import AsyncRpczClient
+from . import my_service_rpcz
+from . import my_service_pb2
+
+client = AsyncRpczClient("tcp://127.0.0.1:9000", my_service_rpcz._MYSERVICE)
+request = my_service_pb2.Void()
+
+loop.run_until_complete(client.SayHello(request), deadline_ms=-1)
+
+```
+

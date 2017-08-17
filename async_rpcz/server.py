@@ -29,7 +29,7 @@ class ReplyChannel:
 
         reply_header_raw = reply_header.SerializeToString()
 
-        msg = self.message_headers + [reply_header_raw,]
+        msg = self.message_headers + [reply_header_raw, b""]
         await self.socket.send_multipart(msg)
 
 

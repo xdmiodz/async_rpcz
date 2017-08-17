@@ -8,7 +8,7 @@ import struct
 from .async_timeout import timeout
 from asyncio import Lock
 
-class AsyncRpczClient():
+class AsyncRpczClient:
     def __init__(self, server_address, descriptor):
         self._service_name = descriptor.name
         self._method_descriptor_map = {method.name: method for method in descriptor.methods}

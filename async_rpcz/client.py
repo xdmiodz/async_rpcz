@@ -10,12 +10,14 @@ from asyncio import Lock
 
 class AsyncRpczClient:
     def __init__(self, server_address, descriptor):
+
         self._service_name = descriptor.name
         self._method_descriptor_map = {method.name: method for method in descriptor.methods}
 
         self._ctx = zmq.asyncio.Context()
         self._backend_socket = self._ctx.socket(zmq.DEALER)
         self._backend_socket.linger = 0
+        self._backend_socket.immediate = True
         self._backend_socket.connect(server_address)
         self._events = dict()
         self._event_id = 0

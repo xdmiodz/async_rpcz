@@ -5,7 +5,6 @@ import zmq.asyncio
 import asyncio
 import uuid
 import struct
-from .async_timeout import timeout
 from asyncio import Lock
 
 class AsyncRpczClient:

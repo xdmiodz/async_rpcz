@@ -61,7 +61,7 @@ class AsyncRpczClient:
             deadline_ms = deadline_ms if deadline_ms >= 0 else None
 
             try:
-                with timeout(deadline_ms):
+                with timeout(deadline_ms / 1000):
                     while not self._events[event_id]:
                         header_raw, msg_raw = await self._process()
             except asyncio.TimeoutError:

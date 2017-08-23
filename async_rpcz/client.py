@@ -9,7 +9,7 @@ from .async_timeout import timeout
 from asyncio import Lock
 
 class AsyncRpczClient:
-    def __init__(self, server_address, descriptor):
+    def __init__(self, server_address, descriptor, **socket_opts):
 
         self._service_name = descriptor.name
         self._method_descriptor_map = {method.name: method for method in descriptor.methods}
@@ -17,7 +17,10 @@ class AsyncRpczClient:
         self._ctx = zmq.asyncio.Context()
         self._backend_socket = self._ctx.socket(zmq.DEALER)
         self._backend_socket.linger = 0
-        self._backend_socket.immediate = True
+
+        for name, value in socket_opts.items():
+            setattr(self._backend_socket, name, value)
+
         self._backend_socket.connect(server_address)
         self._events = dict()
         self._event_id = 0
@@ -28,8 +31,12 @@ class AsyncRpczClient:
         self._event_id =+ 1
         return self._event_id
 
-    async def _process(self):
+    async def _process(self, deadline_ms=-1):
         async with self._socket_lock:
+            events = await self._backend_socket.poll(timeout=deadline_ms)
+            if events == 0:
+                raise RpcDeadlineExceeded()
+
             msg = await self._backend_socket.recv_multipart()
 
         _, event_id_raw, header_raw, msg_raw = msg
@@ -42,7 +49,7 @@ class AsyncRpczClient:
         if method_descriptor is None:
             raise AttributeError("No rpcz method {}".format(name))
 
-        async def _method(request, deadline_ms=-1):
+        async def _method(request, deadline_ms=None):
             event_id = self.event_id
             header = rpcz_pb2.rpc_request_header()
             header.event_id = event_id
@@ -58,14 +65,8 @@ class AsyncRpczClient:
             async with self._socket_lock:
                 await self._backend_socket.send_multipart([b"", event_id_raw, header_raw, request_raw])
 
-            deadline_ms = deadline_ms if deadline_ms >= 0 else None
-
-            try:
-                with timeout(deadline_ms / 1000):
-                    while not self._events[event_id]:
-                        header_raw, msg_raw = await self._process()
-            except asyncio.TimeoutError:
-                raise RpcDeadlineExceeded()
+            while not self._events[event_id]:
+                header_raw, msg_raw = await self._process(deadline_ms)
 
             self._events.pop(event_id)
             header = rpcz_pb2.rpc_response_header()

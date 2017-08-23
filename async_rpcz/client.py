@@ -6,6 +6,7 @@ import asyncio
 import uuid
 import struct
 from asyncio import Lock
+from .async_timeout import timeout
 
 class AsyncRpczClient:
     def __init__(self, server_address, descriptor, **socket_opts):
@@ -27,18 +28,15 @@ class AsyncRpczClient:
 
     @property
     def event_id(self):
-        self._event_id =+ 1
+        self._event_id += 1
         return self._event_id
 
-    async def _process(self, deadline_ms=None):
+    async def _process(self):
         async with self._socket_lock:
-            events = await self._backend_socket.poll(timeout=deadline_ms)
-            if events == 0:
-                raise RpcDeadlineExceeded()
-
             msg = await self._backend_socket.recv_multipart()
 
         _, event_id_raw, header_raw, msg_raw = msg
+
         event_id = struct.unpack("!Q", event_id_raw)[0]
         self._events[event_id] = True
         return header_raw, msg_raw
@@ -64,8 +62,14 @@ class AsyncRpczClient:
             async with self._socket_lock:
                 await self._backend_socket.send_multipart([b"", event_id_raw, header_raw, request_raw])
 
-            while not self._events[event_id]:
-                header_raw, msg_raw = await self._process(deadline_ms)
+            deadline_ms = deadline_ms if isinstance(deadline_ms, int) else 0
+
+            try:
+                with timeout(deadline_ms / 1000):
+                    while not self._events[event_id]:
+                        header_raw, msg_raw = await self._process()
+            except asyncio.TimeoutError:
+                raise RpcDeadlineExceeded()
 
             self._events.pop(event_id)
             header = rpcz_pb2.rpc_response_header()
@@ -78,6 +82,7 @@ class AsyncRpczClient:
 
             response = method_descriptor.output_type._concrete_class()
             response.ParseFromString(msg_raw)
+
             return response
 
         return _method

@@ -30,7 +30,7 @@ class AsyncRpczClient:
         self._event_id =+ 1
         return self._event_id
 
-    async def _process(self, deadline_ms=-1):
+    async def _process(self, deadline_ms=None):
         async with self._socket_lock:
             events = await self._backend_socket.poll(timeout=deadline_ms)
             if events == 0:
@@ -52,7 +52,7 @@ class AsyncRpczClient:
             event_id = self.event_id
             header = rpcz_pb2.rpc_request_header()
             header.event_id = event_id
-            header.deadline = deadline_ms
+            header.deadline = deadline_ms if isinstance(deadline_ms, int) else -1
             header.service = self._service_name
             header.method = name
 

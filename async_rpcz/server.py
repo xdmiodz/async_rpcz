@@ -70,10 +70,12 @@ class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
                 header.ParseFromString(header_raw)
             except:
                 await reply.send_error(rpcz_pb2.rpc_response_header.INVALID_HEADER)
+                await backend_socket.send(b"")
                 continue
 
             if header.service != self._service_name:
                 await reply.send_error(rpcz_pb2.rpc_response_header.NO_SUCH_SERVICE)
+                await backend_socket.send(b"")
                 continue
 
             method_name = header.method
@@ -81,11 +83,13 @@ class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
             method_descriptor = self._method_descriptor_map.get(method_name, None)
             if method_descriptor is None:
                 await reply.send_error(rpcz_pb2.rpc_response_header.NO_SUCH_METHOD)
+                await backend_socket.send(b"")
                 continue
 
             method = getattr(self, method_name, None)
             if method is None:
                 await reply.send_error(rpcz_pb2.rpc_response_header.METHOD_NOT_IMPLEMENTED)
+                await backend_socket.send(b"")
                 continue
 
             msg = method_descriptor.input_type._concrete_class()
@@ -94,6 +98,7 @@ class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
                 msg.ParseFromString(msg_raw)
             except:
                 await reply.send_error(rpcz_pb2.rpc_response_header.INVALID_MESSAGE)
+                await backend_socket.send(b"")
                 continue
 
             await method(msg, reply)
@@ -127,7 +132,6 @@ class AsyncRpczServer(metaclass=AsyncRpczServerMeta):
 
         while True:
             socket_events = await poller.poll()
-
             for socket, _ in socket_events:
                 if socket is frontend_socket:
                     if len(free_backend_sockets) == 0:

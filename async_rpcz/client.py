@@ -5,6 +5,7 @@ import zmq.asyncio
 import asyncio
 import uuid
 import struct
+import datetime
 from asyncio import Lock
 from .async_timeout import timeout
 
@@ -23,7 +24,7 @@ class AsyncRpczClient:
 
         self._backend_socket.connect(server_address)
         self._events = dict()
-        self._event_id = 0
+        self._event_id = hash((id(self), datetime.datetime.now()))
         self._socket_lock = Lock()
 
     @property

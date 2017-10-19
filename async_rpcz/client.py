@@ -29,7 +29,7 @@ class AsyncRpczClient:
 
     @property
     def event_id(self):
-        self._event_id += 1
+        self._event_id = (self._event_id + 1) % 4294967295
         return self._event_id
 
     async def _process(self):

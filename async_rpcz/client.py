@@ -11,6 +11,7 @@ from .async_timeout import timeout
 
 class AsyncRpczClient:
     def __init__(self, server_address, descriptor, **socket_opts):
+        self.server_address = server_address
 
         self._service_name = descriptor.name
         self._method_descriptor_map = {method.name: method for method in descriptor.methods}
